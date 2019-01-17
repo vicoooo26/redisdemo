@@ -8,10 +8,12 @@ import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.lettuce.core.api.sync.RedisCommands;
+import io.vavr.control.Try;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.data.redis.DataRedisTest;
+import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.*;
 import org.springframework.test.context.junit4.SpringRunner;
@@ -47,18 +49,20 @@ public class RedisdemoApplicationTests {
     @Test
     public void testRedisBasedRatelimiter() {
         RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
-                .limitForPeriod(2)
+                .limitForPeriod(10)
                 .limitRefreshPeriod(Duration.ofSeconds(150))
                 //not wait long time , we can handle it using the dead-letter queue
                 .timeoutDuration(Duration.ofMillis(100L))
                 .build();
         RateLimiter rateLimiter = new RedisBasedRateLimiter("limiter", rateLimiterConfig);
-        Supplier supplier = RateLimiter.decorateSupplier(rateLimiter, () -> {
-            System.out.println("---");
-            return 1;
-        });
-//        for (int i = 0; i < 5; i++) {
-        rateLimiter.executeSupplier(supplier);
+//        Supplier supplier = RateLimiter.decorateSupplier(rateLimiter, () -> {
+//            System.out.println("---");
+//            return 1;
+//        });
+//        for (int i = 0; i < 3; i++) {
+//            System.out.println(Try.ofSupplier(supplier)
+//                    .onFailure((throwable) -> System.out.println("error!"))
+//                    .onSuccess((result) -> System.out.println("success and the result is : " + result)));
 //        }
     }
 
@@ -78,6 +82,27 @@ public class RedisdemoApplicationTests {
             System.out.println("error");
         } finally {
             this.redisClient.shutdown();
+        }
+    }
+
+
+    @Test
+    public void testLettuceAsync() throws Exception {
+        Boolean success = true;
+        try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
+            RedisAsyncCommands<String, String> commands = connection.async();
+            RedisFuture<String> redisFuture = commands.get("limiter");
+            String permits = redisFuture.get(Duration.ofMillis(100L).toMillis(), TimeUnit.MILLISECONDS);
+            if (permits != null && Integer.valueOf(permits) > 0) {
+                commands.decr("limiter");
+            } else {
+                success = false;
+            }
+        } catch (Exception e) {
+            throw e;
+        } finally {
+            this.redisClient.shutdown();
+            System.out.println(success);
         }
     }
 }
