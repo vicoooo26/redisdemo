@@ -7,63 +7,85 @@ import io.github.resilience4j.ratelimiter.event.RateLimiterOnSuccessEvent;
 import io.github.resilience4j.ratelimiter.internal.RateLimiterEventProcessor;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisFuture;
+import io.lettuce.core.SetArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.lettuce.core.api.sync.RedisCommands;
-import io.lettuce.core.pubsub.RedisPubSubListener;
-import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
-import io.lettuce.core.pubsub.api.sync.RedisPubSubCommands;
 import io.vavr.control.Option;
 
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 
-//TODO implement by using pub/sub mode
-public class RedisBasedRatelimiterV2 implements RateLimiter {
+//TODO shutdown redisClient properly
+public class RedisBasedRateLimiterV2 implements RateLimiter {
+
     private static final String NAME_MUST_NOT_BE_NULL = "Name must not be null";
     private static final String CONFIG_MUST_NOT_BE_NULL = "RateLimiterConfig must not be null";
 
     private final String name;
     private final AtomicReference<RateLimiterConfig> rateLimiterConfig;
-    private final RedisBasedRatelimiterV2.RedisBasedRateLimiterV2Metrics metrics;
+    private final RedisBasedRateLimiterV2.RedisBasedRateLimiterV3Metrics metrics;
     private final RateLimiterEventProcessor eventProcessor;
     private final RedisClient redisClient;
-
-    // 存放pub/sub的数据，内部使用一个listener操作它，填充publish的数据
-    private final static Map<String, Integer> concernedMessage = new HashMap<>();
-    private final static Map<String, Long> concernedSub = new HashMap<>();
-
-    private RedisPubSubListener<String, Integer> listener;
+    private final ScheduledExecutorService scheduler;
 
 
-    public RedisBasedRatelimiterV2(String name, final RateLimiterConfig rateLimiterConfig) {
-        this(name, rateLimiterConfig, null);
+    public RedisBasedRateLimiterV2(String name, final RateLimiterConfig rateLimiterConfig) {
+        this(name, rateLimiterConfig, null, null);
     }
 
-    public RedisBasedRatelimiterV2(String name, RateLimiterConfig rateLimiterConfig, RedisClient redisClient) {
+    public RedisBasedRateLimiterV2(String name, RateLimiterConfig rateLimiterConfig, ScheduledExecutorService scheduler, RedisClient redisClient) {
         this.name = requireNonNull(name, NAME_MUST_NOT_BE_NULL);
         this.redisClient = Option.of(redisClient).getOrElse(this::configureRedisClient);
-        this.metrics = this.new RedisBasedRateLimiterV2Metrics();
+        this.metrics = this.new RedisBasedRateLimiterV3Metrics();
         this.eventProcessor = new RateLimiterEventProcessor();
         this.rateLimiterConfig = new AtomicReference<>(requireNonNull(initLimit(rateLimiterConfig), CONFIG_MUST_NOT_BE_NULL));
-        listener = initRedisPubSubListener();
+        this.scheduler = Option.of(scheduler).getOrElse(this::configureScheduler);
+        scheduleLimitRefresh();
     }
 
-    private RedisClient configureRedisClient() {
-        return SpringContext.getBean(RedisClient.class);
+    private ScheduledExecutorService configureScheduler() {
+        ThreadFactory threadFactory = target -> {
+            Thread thread = new Thread(target, "SchedulerForSemaphoreBasedRateLimiterImpl-" + name);
+            thread.setDaemon(true);
+            return thread;
+        };
+        return newSingleThreadScheduledExecutor(threadFactory);
+    }
+
+
+    private void scheduleLimitRefresh() {
+        scheduler.scheduleAtFixedRate(
+                this::refreshLimit,
+                this.rateLimiterConfig.get().getLimitRefreshPeriodInNanos(),
+                this.rateLimiterConfig.get().getLimitRefreshPeriodInNanos(),
+                TimeUnit.NANOSECONDS
+        );
+    }
+
+    void refreshLimit() {
+        try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
+            RedisCommands<String, String> commands = connection.sync();
+            SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
+                    .nx();
+            commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod()), args);
+        }
     }
 
     private RateLimiterConfig initLimit(RateLimiterConfig rateLimiterConfig) {
         try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
             RedisCommands<String, String> commands = connection.sync();
-            if (commands.setnx(name, String.valueOf(rateLimiterConfig.getLimitForPeriod()))) {
-                commands.expire(name, rateLimiterConfig.getLimitRefreshPeriod().getSeconds());
+            SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.getLimitRefreshPeriod().getSeconds())
+                    .nx();
+            if ("OK".equals(commands.set(name, String.valueOf(rateLimiterConfig.getLimitForPeriod()), args))) {
+
             } else {
                 String permitsInRedis = commands.get(name);
                 // 即当一个JVM使用掉Redis中最后一个permit且permits未刷新
@@ -84,50 +106,33 @@ public class RedisBasedRatelimiterV2 implements RateLimiter {
         }
     }
 
-    private RedisPubSubListener initRedisPubSubListener() {
-        return new RedisPubSubListener<String, Integer>() {
-            @Override
-            public void message(String channel, Integer message) {
-                concernedMessage.put(channel, message);
-            }
 
-            @Override
-            public void message(String pattern, String channel, Integer message) {
-            }
-
-            @Override
-            public void subscribed(String channel, long count) {
-                concernedSub.put(channel, count);
-            }
-
-            @Override
-            public void psubscribed(String pattern, long count) {
-            }
-
-            @Override
-            public void unsubscribed(String channel, long count) {
-            }
-
-            @Override
-            public void punsubscribed(String pattern, long count) {
-            }
-        };
+    private RedisClient configureRedisClient() {
+        return SpringContext.getBean(RedisClient.class);
     }
 
-    //每次获取都尝试从redis中获取
-    private boolean tryAcquireFromRedis(Duration timeoutDuration) {
+    private boolean tryAcquireFromRedis(Duration timeoutDuration) throws Exception {
         boolean success = true;
         try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
             RedisAsyncCommands<String, String> commands = connection.async();
-            RedisFuture<String> redisFuture = commands.get(name);
-            String permits = redisFuture.get(timeoutDuration.toNanos(), TimeUnit.NANOSECONDS);
-            if (permits != null && Integer.valueOf(permits) > 0) {
-                commands.decr(name);
+            SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
+                    .nx();
+            if ("OK".equals(commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod()), args))) {
+                success = true;
             } else {
-                success = false;
+                RedisFuture<String> redisFuture = commands.get(name);
+                String permits = redisFuture.get(timeoutDuration.toMillis(), TimeUnit.MILLISECONDS);
+                if (permits != null && Integer.valueOf(permits) > 0) {
+                    commands.decr(name);
+                } else {
+                    success = false;
+                }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+            success = false;
+            throw e;
         } finally {
-            this.redisClient.shutdown();
             return success;
         }
     }
@@ -177,17 +182,17 @@ public class RedisBasedRatelimiterV2 implements RateLimiter {
     }
 
     @Override
-    public RateLimiter.Metrics getMetrics() {
+    public Metrics getMetrics() {
         return this.metrics;
     }
 
     @Override
-    public RateLimiter.EventPublisher getEventPublisher() {
+    public EventPublisher getEventPublisher() {
         return eventProcessor;
     }
 
-    private final class RedisBasedRateLimiterV2Metrics implements RateLimiter.Metrics {
-        private RedisBasedRateLimiterV2Metrics() {
+    private final class RedisBasedRateLimiterV3Metrics implements Metrics {
+        private RedisBasedRateLimiterV3Metrics() {
         }
 
         @Override

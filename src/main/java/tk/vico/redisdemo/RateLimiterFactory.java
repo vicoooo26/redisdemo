@@ -21,10 +21,10 @@ public class RateLimiterFactory {
                 if (applicationLimiterContainer.isEmpty()) {
                     RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
                             .limitForPeriod(10)
-                            .limitRefreshPeriod(Duration.ofSeconds(30))
+                            .limitRefreshPeriod(Duration.ofSeconds(60))
                             .timeoutDuration(Duration.ofMillis(100L))
                             .build();
-                    RateLimiter rateLimiter = new RedisBasedRateLimiter("default", rateLimiterConfig);
+                    RateLimiter rateLimiter = new RedisBasedRateLimiterV2("default", rateLimiterConfig);
                     applicationLimiterContainer.put("default", rateLimiter);
                 }
             }

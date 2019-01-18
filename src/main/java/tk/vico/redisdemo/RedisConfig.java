@@ -31,7 +31,8 @@ public class RedisConfig extends CachingConfigurerSupport {
 
     @Bean
     public RedisClient redisClient() {
-        RedisURI redisURI = RedisURI.Builder.redis("192.168.99.100", 6379).build();
+//        RedisURI redisURI = RedisURI.Builder.redis("192.168.99.100", 6379).build();
+        RedisURI redisURI = RedisURI.Builder.redis("127.0.0.1", 6379).build();
         RedisClient redisClient = RedisClient.create(redisURI);
         return redisClient;
     }
