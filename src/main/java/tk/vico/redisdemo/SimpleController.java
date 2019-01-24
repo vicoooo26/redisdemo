@@ -22,7 +22,9 @@ public class SimpleController {
         String result;
         try {
             result = Try.of(function0)
-                    .onFailure((throwable) -> new RuntimeException(throwable.getMessage())).get();
+                        .onFailure((throwable) -> new RuntimeException(throwable.getMessage())).get();
+            System.out.println(rateLimiter.getMetrics().getAvailablePermissions());
+            System.out.println(rateLimiter.getMetrics().getNumberOfWaitingThreads());
         } catch (Exception e) {
             result = e.getMessage();
         }

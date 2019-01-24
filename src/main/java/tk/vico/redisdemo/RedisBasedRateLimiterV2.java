@@ -23,7 +23,6 @@ import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 
-//TODO shutdown redisClient properly
 public class RedisBasedRateLimiterV2 implements RateLimiter {
 
     private static final String NAME_MUST_NOT_BE_NULL = "Name must not be null";
@@ -101,9 +100,8 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
                         .limitForPeriod(permits)
                         .build();
             }
-        } finally {
-            return rateLimiterConfig;
         }
+        return rateLimiterConfig;
     }
 
 
@@ -117,24 +115,30 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
             RedisAsyncCommands<String, String> commands = connection.async();
             SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
                     .nx();
-            if ("OK".equals(commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod()), args))) {
-                success = true;
-            } else {
-                RedisFuture<String> redisFuture = commands.get(name);
-                String permits = redisFuture.get(timeoutDuration.toMillis(), TimeUnit.MILLISECONDS);
-                if (permits != null && Integer.valueOf(permits) > 0) {
-                    commands.decr(name);
-                } else {
-                    success = false;
+            RedisFuture<String> redisFuture = commands.get(name);
+            //current permits
+            String permits = redisFuture.get(timeoutDuration.toMillis(), TimeUnit.MILLISECONDS);
+            if (permits == null) {
+                commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod() - 1), args);
+            } else if (Integer.parseInt(permits) > 0) {
+                commands.watch(name);
+                //开启事务
+                commands.multi();
+                commands.decr(name);
+                RedisFuture transactionFuture = commands.exec();
+                //事务执行失败说明有其他client使用了permits，重新获取permits
+                if (transactionFuture.isCancelled()) {
+                    if (commands.decr(name).get() < 0) {
+                        success = false;
+                    }
                 }
-            }
+            } else
+                success = false;
         } catch (Exception e) {
             e.printStackTrace();
-            success = false;
             throw e;
-        } finally {
-            return success;
         }
+        return success;
     }
 
     @Override
@@ -197,14 +201,12 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
 
         @Override
         public int getAvailablePermissions() {
-            //TODO need to implement
-            return 0;
+            return Integer.parseInt(redisClient.connect().sync().get(name));
         }
 
         @Override
         public int getNumberOfWaitingThreads() {
-            //TODO need to implement
-            return 0;
+            return redisClient.getResources().computationThreadPoolSize();
         }
 
     }

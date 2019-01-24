@@ -38,10 +38,18 @@ public class RedisdemoApplicationTests {
 
 
     @Test
-    public void testLettuce() {
+    public void testLettuce() throws Exception {
         StatefulRedisConnection connection = redisClient.connect();
-        RedisCommands commands = connection.sync();
-        commands.set("name", "vico");
+        RedisAsyncCommands commands = connection.async();
+        commands.watch("default");
+        commands.multi();
+        commands.decr("default");
+        RedisFuture<String> redisFuture = commands.get("default");
+        RedisFuture execResult = commands.exec();
+        String permits = redisFuture.get(100, TimeUnit.SECONDS);
+        System.out.println(permits);
+//        RedisCommands commands = connection.sync();
+//        commands.set("name", "vico");
         connection.close();
         redisClient.shutdown();
     }
@@ -49,11 +57,11 @@ public class RedisdemoApplicationTests {
     @Test
     public void testRedisBasedRatelimiter() {
         RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
-                .limitForPeriod(10)
-                .limitRefreshPeriod(Duration.ofSeconds(150))
-                //not wait long time , we can handle it using the dead-letter queue
-                .timeoutDuration(Duration.ofMillis(100L))
-                .build();
+                                                               .limitForPeriod(10)
+                                                               .limitRefreshPeriod(Duration.ofSeconds(150))
+                                                               //not wait long time , we can handle it using the dead-letter queue
+                                                               .timeoutDuration(Duration.ofMillis(100L))
+                                                               .build();
         RateLimiter rateLimiter = new RedisBasedRateLimiter("limiter", rateLimiterConfig);
 //        Supplier supplier = RateLimiter.decorateSupplier(rateLimiter, () -> {
 //            System.out.println("---");

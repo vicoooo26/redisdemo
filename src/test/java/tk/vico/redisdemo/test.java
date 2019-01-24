@@ -1,18 +1,55 @@
 package tk.vico.redisdemo;
 
-import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.pubsub.RedisPubSubListener;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.pubsub.api.sync.RedisPubSubCommands;
 
-import java.time.Duration;
-import java.util.function.Supplier;
+import java.util.*;
+import java.util.function.Function;
+
+import static java.lang.System.*;
+
 
 public class test {
     public static void main(String[] args) {
+//        String[] array = {"333","22","1"};
+//        Arrays.sort(array, Comparator.comparingInt(str -> str.length()));
+//        //java编译器它能感知离上下文最近的,上面的Comparator可以在当前上下文中直接获取到
+//        //下面的Comparator是经过reversed()转换后得到的，无法直接从当前上下文获取,需要显式指定为String
+//        Arrays.sort(array, Comparator.comparingInt((String str) -> str.length()).reversed());
+//
+//        Arrays.stream(array).
+//                forEach(out::println);
+//
+//        Set<String> names = Set.of("abc", "def", "ghi");
+//        Integer someVariable = 100;
+//        names.forEach(name ->
+//        {
+//            someVariable = 200; // This line does not compile.
+// Gives the compilation error — Local variable someVariable defined in an enclosing scope must be final or effectively final
+//        });
+//        String outerValue = "Outer class value";
+//        Foo fooIC = new Foo() {
+//            String outerValue = "Inner class value";
+//
+//            @Override
+//            public String method(String string) {
+//                return outerValue + string;
+//            }
+//        };
+//        String resultIC = fooIC.method("!!!");
+//        out.println(resultIC);
+//
+//        Foo fooLambda = parameter -> {
+////            String outerValue = "Lambda value";
+//            return outerValue + parameter;
+//        };
+//        String resultLambda = fooLambda.method("");
+//
+//        out.println("Results: resultIC = " + resultIC +
+//                ", resultLambda = " + resultLambda);
     }
 
     public void testListener() {
@@ -50,7 +87,7 @@ public class test {
             }
 
         };
-        try (StatefulRedisPubSubConnection connection = redisClient.connectPubSub()) {
+        try (StatefulRedisPubSubConnection<String, String> connection = redisClient.connectPubSub()) {
             connection.addListener(listener);
             RedisPubSubCommands<String, String> commands = connection.sync();
             commands.subscribe("pubsub");
