@@ -14,13 +14,10 @@ import io.lettuce.core.api.sync.RedisCommands;
 import io.vavr.control.Option;
 
 import java.time.Duration;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Objects.requireNonNull;
-import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 
 public class RedisBasedRateLimiterV2 implements RateLimiter {
@@ -33,49 +30,18 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
     private final RedisBasedRateLimiterV2.RedisBasedRateLimiterV3Metrics metrics;
     private final RateLimiterEventProcessor eventProcessor;
     private final RedisClient redisClient;
-    private final ScheduledExecutorService scheduler;
 
 
     public RedisBasedRateLimiterV2(String name, final RateLimiterConfig rateLimiterConfig) {
-        this(name, rateLimiterConfig, null, null);
+        this(name, rateLimiterConfig, null);
     }
 
-    public RedisBasedRateLimiterV2(String name, RateLimiterConfig rateLimiterConfig, ScheduledExecutorService scheduler, RedisClient redisClient) {
+    public RedisBasedRateLimiterV2(String name, RateLimiterConfig rateLimiterConfig, RedisClient redisClient) {
         this.name = requireNonNull(name, NAME_MUST_NOT_BE_NULL);
         this.redisClient = Option.of(redisClient).getOrElse(this::configureRedisClient);
         this.metrics = this.new RedisBasedRateLimiterV3Metrics();
         this.eventProcessor = new RateLimiterEventProcessor();
         this.rateLimiterConfig = new AtomicReference<>(requireNonNull(initLimit(rateLimiterConfig), CONFIG_MUST_NOT_BE_NULL));
-        this.scheduler = Option.of(scheduler).getOrElse(this::configureScheduler);
-        scheduleLimitRefresh();
-    }
-
-    private ScheduledExecutorService configureScheduler() {
-        ThreadFactory threadFactory = target -> {
-            Thread thread = new Thread(target, "SchedulerForSemaphoreBasedRateLimiterImpl-" + name);
-            thread.setDaemon(true);
-            return thread;
-        };
-        return newSingleThreadScheduledExecutor(threadFactory);
-    }
-
-
-    private void scheduleLimitRefresh() {
-        scheduler.scheduleAtFixedRate(
-                this::refreshLimit,
-                this.rateLimiterConfig.get().getLimitRefreshPeriodInNanos(),
-                this.rateLimiterConfig.get().getLimitRefreshPeriodInNanos(),
-                TimeUnit.NANOSECONDS
-        );
-    }
-
-    void refreshLimit() {
-        try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
-            RedisCommands<String, String> commands = connection.sync();
-            SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
-                    .nx();
-            commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod()), args);
-        }
     }
 
     private RateLimiterConfig initLimit(RateLimiterConfig rateLimiterConfig) {
@@ -87,11 +53,6 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
 
             } else {
                 String permitsInRedis = commands.get(name);
-                // 即当一个JVM使用掉Redis中最后一个permit且permits未刷新
-                // 在同一个周期内另外一个JVM中欲构建Ratelimiter，其从Redis中获取的permits为0
-                // 此时无法构建RateLimiterConfig以及RateLimiter
-                // 故为其添加一个，但在redis中的permit仍然为0
-                // 保证RateLimiter成功创建，但仍然调用被限
                 int permits = Integer.valueOf(permitsInRedis);
                 if (permits == 0) {
                     permits = 1;
@@ -104,7 +65,6 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
         return rateLimiterConfig;
     }
 
-
     private RedisClient configureRedisClient() {
         return SpringContext.getBean(RedisClient.class);
     }
@@ -116,17 +76,14 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
             SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
                     .nx();
             RedisFuture<String> redisFuture = commands.get(name);
-            //current permits
             String permits = redisFuture.get(timeoutDuration.toMillis(), TimeUnit.MILLISECONDS);
             if (permits == null) {
                 commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod() - 1), args);
             } else if (Integer.parseInt(permits) > 0) {
                 commands.watch(name);
-                //开启事务
                 commands.multi();
                 commands.decr(name);
                 RedisFuture transactionFuture = commands.exec();
-                //事务执行失败说明有其他client使用了permits，重新获取permits
                 if (transactionFuture.isCancelled()) {
                     if (commands.decr(name).get() < 0) {
                         success = false;
@@ -201,12 +158,20 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
 
         @Override
         public int getAvailablePermissions() {
-            return Integer.parseInt(redisClient.connect().sync().get(name));
+            try {
+                return Integer.parseInt(redisClient.connect().sync().get(name));
+            } catch (NumberFormatException e) {
+                return -1;
+            }
         }
 
         @Override
         public int getNumberOfWaitingThreads() {
-            return redisClient.getResources().computationThreadPoolSize();
+            try {
+                return redisClient.getResources().computationThreadPoolSize();
+            } catch (NumberFormatException e) {
+                return -1;
+            }
         }
 
     }

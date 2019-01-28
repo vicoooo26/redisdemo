@@ -3,7 +3,8 @@ spring:
     cache-names: redisDemo
   # REDIS (RedisProperties)
   redis:
-    host: 192.168.99.100 # server host
+#    host: 192.168.99.100 # server host
+    pool: 127.0.0.1
     port: 6379 # connection port
 server:
   port: 8080

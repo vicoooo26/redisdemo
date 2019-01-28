@@ -6,13 +6,11 @@ import io.lettuce.core.pubsub.RedisPubSubListener;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.pubsub.api.sync.RedisPubSubCommands;
 
-import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static java.lang.System.*;
 
-
-public class test {
+public class Test {
     public static void main(String[] args) {
 //        String[] array = {"333","22","1"};
 //        Arrays.sort(array, Comparator.comparingInt(str -> str.length()));
@@ -50,6 +48,23 @@ public class test {
 //
 //        out.println("Results: resultIC = " + resultIC +
 //                ", resultLambda = " + resultLambda);
+//        AdderImpl adder = new AdderImpl();
+//        System.out.println(adder.add(a -> a + " from lambda"));
+//        adder.add((Integer a) -> {
+//            a = a + a;
+//            System.out.println(a);
+//        });
+
+        int[] total = new int[1];
+        Runnable r = () -> total[0]++;
+
+        for (int i = 0; i < 5; i++) {
+            r.run();
+        }
+
+        for (int i = 0; i < total.length; i++) {
+            System.out.println(total[i]);
+        }
     }
 
     public void testListener() {
@@ -96,5 +111,29 @@ public class test {
             e.printStackTrace();
         }
         redisClient.shutdown();
+    }
+
+    static void consumeA(Integer a) {
+        a = a + a;
+        System.out.println(a);
+    }
+}
+
+interface Adder {
+    String add(Function<String, String> f);
+
+    void add(Consumer<Integer> f);
+}
+
+class AdderImpl implements Adder {
+
+    @Override
+    public String add(Function<String, String> f) {
+        return f.apply("Something ");
+    }
+
+    @Override
+    public void add(Consumer<Integer> f) {
+        f.accept(2);
     }
 }

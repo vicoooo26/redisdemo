@@ -6,24 +6,135 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
+
+import static org.junit.Assert.*;
+
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.MockitoTestExecutionListener;
+import org.springframework.test.context.TestExecutionListeners;
 import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MockMvcBuilder;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 import java.time.Duration;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+
+import static org.mockito.Mockito.*;
+import static org.mockito.BDDMockito.*;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest
+@TestExecutionListeners(listeners = MockitoTestExecutionListener.class)
 public class RedisdemoApplicationTests {
     @Autowired
     protected RedisClient redisClient;
+    @Autowired
+    private WebApplicationContext context;
+
+    private static MockMvc mockMvc;
+
+    @Mock
+    private List mockList;
+
+    @MockBean
+    private MyDictionary myDictionary;
+
+    @Before
+    public void before() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+    }
+
+    @Mock
+    Map<String, String> wordMap;
+
+    @InjectMocks
+    MyDictionary dic = new MyDictionary();
+
+    @Test
+    public void whenUseInjectMocksAnnotation_thenCorrect() {
+        Mockito.when(wordMap.get("aWord")).thenReturn("aMeaning");
+
+        assertEquals("aMeaning", dic.getMeaning("aWord"));
+    }
 
 
     @Test
     public void contextLoads() {
+    }
+
+    @Test
+    public void createMock() {
+        assertTrue(mockList instanceof List);
+        // mock 方法不仅可以 Mock 接口类, 还可以 Mock 具体的类型.
+        ArrayList mockedArrayList = mock(ArrayList.class);
+        assertTrue(mockedArrayList instanceof List);
+        assertTrue(mockedArrayList instanceof ArrayList);
+    }
+
+    @Test
+    public void testInjectMock() {
+    }
+
+    @Test
+    public void testSpy() {
+        List list = new LinkedList();
+        List spy = spy(list);
+
+        // 对 spy.size() 进行定制.
+        when(spy.size()).thenReturn(100);
+
+        spy.add("one");
+        spy.add("two");
+
+        // 因为我们没有对 get(0), get(1) 方法进行定制,
+        // 因此这些调用其实是调用的真实对象的方法.
+        assertEquals(spy.get(0), "one");
+        assertEquals(spy.get(1), "two");
+
+        assertEquals(spy.size(), 100);
+
+
+    }
+
+    @Test
+    public void testVerify() {
+        List mockedList = mock(List.class);
+        mockedList.add("one");
+        mockedList.add("two");
+        mockedList.add("three times");
+        mockedList.add("three times");
+        mockedList.add("three times");
+        when(mockedList.size()).thenReturn(5);
+        assertEquals(mockedList.size(), 5);
+
+        verify(mockedList, atLeastOnce()).add("one");
+        verify(mockedList, times(1)).add("two");
+        verify(mockedList, times(3)).add("three times");
+        verify(mockedList, never()).isEmpty();
+    }
+
+    @Test
+    public void testCapture() {
+        List<String> list = Arrays.asList("1", "2");
+        List mockedList = mock(List.class);
+        ArgumentCaptor<List> argument = ArgumentCaptor.forClass(List.class);
+        mockedList.addAll(list);
+        verify(mockedList).addAll(argument.capture());
+
+        assertEquals(2, argument.getValue().size());
+        assertEquals(list, argument.getValue());
     }
 
 
@@ -47,11 +158,11 @@ public class RedisdemoApplicationTests {
     @Test
     public void testRedisBasedRatelimiter() {
         RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
-                                                               .limitForPeriod(10)
-                                                               .limitRefreshPeriod(Duration.ofSeconds(150))
-                                                               //not wait long time , we can handle it using the dead-letter queue
-                                                               .timeoutDuration(Duration.ofMillis(100L))
-                                                               .build();
+                .limitForPeriod(10)
+                .limitRefreshPeriod(Duration.ofSeconds(150))
+                //not wait long time , we can handle it using the dead-letter queue
+                .timeoutDuration(Duration.ofMillis(100L))
+                .build();
         RateLimiter rateLimiter = new RedisBasedRateLimiter("limiter", rateLimiterConfig);
 //        Supplier supplier = RateLimiter.decorateSupplier(rateLimiter, () -> {
 //            System.out.println("---");

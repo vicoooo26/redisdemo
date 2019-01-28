@@ -9,5 +9,5 @@ import org.springframework.web.bind.annotation.RestController;
 public interface SimpleController {
 
     @RequestMapping(value = "/invoke", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_VALUE)
-    String invoke();
+    void invoke();
 }
