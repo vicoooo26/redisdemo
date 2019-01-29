@@ -23,11 +23,11 @@ public class AggregateTest {
         before();
 
         long start = System.currentTimeMillis();
-        CyclicBarrier barrier = new CyclicBarrier(1000, new Time(start));
+        CyclicBarrier barrier = new CyclicBarrier(100, new Time(start));
 
-        ExecutorService executor = Executors.newFixedThreadPool(1000);
+        ExecutorService executor = Executors.newFixedThreadPool(100);
         //起n个线程
-        for (int i = 1; i <= 1000; i++) {
+        for (int i = 1; i <= 100; i++) {
             executor.submit(() -> {
                 try {
                     long result = ratelimiter();
@@ -61,7 +61,7 @@ public class AggregateTest {
         RedisURI redisURI = RedisURI.Builder.redis("127.0.0.1", 6379).build();
         RedisClient redisClient = RedisClient.create(redisURI);
         RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
-                .limitForPeriod(2)
+                .limitForPeriod(10)
                 .limitRefreshPeriod(Duration.ofSeconds(180))
                 .timeoutDuration(Duration.ofMillis(100L))
                 .build();

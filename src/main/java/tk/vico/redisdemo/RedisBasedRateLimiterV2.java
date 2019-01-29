@@ -80,15 +80,13 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
             if (permits == null) {
                 commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod() - 1), args);
             } else if (Integer.parseInt(permits) > 0) {
+                //TODO clarify watch position
                 commands.watch(name);
                 commands.multi();
                 commands.decr(name);
                 RedisFuture transactionFuture = commands.exec();
                 if (transactionFuture.isCancelled()) {
-                    //TODO need to clarify
-                    if (commands.decr(name).get() < 0) {
-                        success = false;
-                    }
+                    success = false;
                 }
             } else
                 success = false;
