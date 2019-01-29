@@ -8,3 +8,5 @@ spring:
     port: 6379 # connection port
 server:
   port: 8080
+
+round: 100

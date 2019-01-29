@@ -54,7 +54,7 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
             } else {
                 String permitsInRedis = commands.get(name);
                 int permits = Integer.valueOf(permitsInRedis);
-                if (permits == 0) {
+                if (permits <= 0) {
                     permits = 1;
                 }
                 rateLimiterConfig = RateLimiterConfig.from(rateLimiterConfig)
@@ -85,6 +85,7 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
                 commands.decr(name);
                 RedisFuture transactionFuture = commands.exec();
                 if (transactionFuture.isCancelled()) {
+                    //TODO need to clarify
                     if (commands.decr(name).get() < 0) {
                         success = false;
                     }

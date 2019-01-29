@@ -1,7 +1,7 @@
 package tk.vico.redisdemo;
 
 import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.vavr.CheckedRunnable;
+import io.vavr.CheckedFunction0;
 import io.vavr.control.Try;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,16 +13,16 @@ public class SimpleControllerImpl implements SimpleController {
     private RateLimiterFactory rateLimiterFactory;
 
     @Override
-    public void invoke() {
+    public String invoke() {
         RateLimiter rateLimiter = rateLimiterFactory.getApplicationLimiter("default");
-        CheckedRunnable runnable = RateLimiter.decorateCheckedRunnable(rateLimiter, () -> System.out.println("executing!!!"));
-        try {
-            Try.run(runnable)
-                    .onFailure((throwable) -> new RuntimeException(throwable.getMessage())).get();
-//            System.out.println(rateLimiter.getMetrics().getAvailablePermissions());
-//            System.out.println(rateLimiter.getMetrics().getNumberOfWaitingThreads());
-        } catch (Exception e) {
-            System.out.println("error: " + e.getMessage());
-        }
+        CheckedFunction0<String> function = RateLimiter.decorateCheckedSupplier(rateLimiter, () -> ("executing!!!"));
+        String result = Try.of(function)
+                .recover((throwable) -> "error: " + throwable.getMessage()).get();
+        return result;
+    }
+
+    @Override
+    public String calculateAverageTime() {
+        return null;
     }
 }
