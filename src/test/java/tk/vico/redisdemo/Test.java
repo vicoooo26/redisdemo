@@ -1,16 +1,23 @@
 package tk.vico.redisdemo;
 
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.pubsub.RedisPubSubListener;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.pubsub.api.sync.RedisPubSubCommands;
+import io.vavr.CheckedRunnable;
+import io.vavr.control.Try;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 
 public class Test {
@@ -101,11 +108,30 @@ public class Test {
 //        } catch (InterruptedException e) {
 //            e.printStackTrace();
 //        }
-        int N = 4;
-        CyclicBarrier barrier = new CyclicBarrier(N, () -> System.out.println("当前线程" + Thread.currentThread().getName()));
+//        int N = 4;
+//        CyclicBarrier barrier = new CyclicBarrier(N, () -> System.out.println("当前线程" + Thread.currentThread().getName()));
+//
+//        for (int i = 0; i < N; i++)
+//            new Writer(barrier).start();
+        RedisURI redisURI = RedisURI.Builder.redis("127.0.0.1", 6379).build();
+        RedisClient redisClient = RedisClient.create(redisURI);
+        RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
+                .limitForPeriod(50)
+                .limitRefreshPeriod(Duration.ofSeconds(180))
+                .timeoutDuration(Duration.ofMillis(100L))
+                .build();
+        RateLimiter rateLimiter = new RedisBasedRateLimiterV3("default_local", rateLimiterConfig, redisClient);
+        CheckedRunnable runnable = RateLimiter.decorateCheckedRunnable(rateLimiter, () -> System.out.println("executing!!!-success"));
 
-        for (int i = 0; i < N; i++)
-            new Writer(barrier).start();
+        List<Long> sum = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) {
+            long start = System.currentTimeMillis();
+            Try.run(runnable)
+                    .onFailure((throwable) -> System.out.println("executing!!!-error: " + throwable.getMessage()));
+            long current = System.currentTimeMillis();
+            sum.add(current - start);
+        }
+        System.out.println(sum.stream().collect(Collectors.summarizingLong(Long::longValue)));
     }
 
     static class Writer extends Thread {

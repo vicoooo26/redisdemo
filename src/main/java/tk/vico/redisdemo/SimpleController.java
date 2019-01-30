@@ -12,5 +12,5 @@ public interface SimpleController {
     String invoke();
 
     @RequestMapping(value = "/average", method = RequestMethod.GET, produces = MediaType.APPLICATION_JSON_VALUE)
-    String calculateAverageTime();
+    long calculateAverageTime();
 }

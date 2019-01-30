@@ -9,10 +9,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 
-/**
- * @author janti
- * reids 相关bean的配置
- */
 @Configuration
 @EnableCaching
 public class RedisConfig extends CachingConfigurerSupport {

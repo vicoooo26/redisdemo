@@ -6,10 +6,6 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
-
-import static org.junit.Assert.*;
-
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
@@ -20,19 +16,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.MockitoTestExecutionListener;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.TestExecutionListeners;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MockMvcBuilder;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.*;
-import static org.mockito.BDDMockito.*;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest
@@ -42,19 +38,17 @@ public class RedisdemoApplicationTests {
     protected RedisClient redisClient;
     @Autowired
     private WebApplicationContext context;
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     private static MockMvc mockMvc;
+    static List<Long> ratelimiterSum = new ArrayList<>();
 
     @Mock
     private List mockList;
 
     @MockBean
     private MyDictionary myDictionary;
-
-    @Before
-    public void before() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
-    }
 
     @Mock
     Map<String, String> wordMap;

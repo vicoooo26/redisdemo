@@ -8,6 +8,7 @@ import io.github.resilience4j.ratelimiter.internal.RateLimiterEventProcessor;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.SetArgs;
+import io.lettuce.core.TransactionResult;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -20,23 +21,23 @@ import java.util.concurrent.atomic.AtomicReference;
 import static java.util.Objects.requireNonNull;
 
 
-public class RedisBasedRateLimiterV2 implements RateLimiter {
+public class RedisBasedRateLimiterV3 implements RateLimiter {
 
     private static final String NAME_MUST_NOT_BE_NULL = "Name must not be null";
     private static final String CONFIG_MUST_NOT_BE_NULL = "RateLimiterConfig must not be null";
 
     private final String name;
     private final AtomicReference<RateLimiterConfig> rateLimiterConfig;
-    private final RedisBasedRateLimiterV2.RedisBasedRateLimiterV3Metrics metrics;
+    private final RedisBasedRateLimiterV3.RedisBasedRateLimiterV3Metrics metrics;
     private final RateLimiterEventProcessor eventProcessor;
     private final RedisClient redisClient;
 
 
-    public RedisBasedRateLimiterV2(String name, final RateLimiterConfig rateLimiterConfig) {
+    public RedisBasedRateLimiterV3(String name, final RateLimiterConfig rateLimiterConfig) {
         this(name, rateLimiterConfig, null);
     }
 
-    public RedisBasedRateLimiterV2(String name, RateLimiterConfig rateLimiterConfig, RedisClient redisClient) {
+    public RedisBasedRateLimiterV3(String name, RateLimiterConfig rateLimiterConfig, RedisClient redisClient) {
         this.name = requireNonNull(name, NAME_MUST_NOT_BE_NULL);
         this.redisClient = Option.of(redisClient).getOrElse(this::configureRedisClient);
         this.metrics = this.new RedisBasedRateLimiterV3Metrics();
@@ -58,20 +59,19 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
         return SpringContext.getBean(RedisClient.class);
     }
 
-    private boolean tryAcquireFromRedis(Duration timeoutDuration) throws Exception {
+    private boolean tryAcquireFromRedis() {
         try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
-            RedisAsyncCommands<String, String> commands = connection.async();
+            RedisCommands<String, String> commands = connection.sync();
             SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
                     .nx();
             commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod()), args);
-            RedisFuture<String> redisFuture = commands.get(name);
-            String permits = redisFuture.get(timeoutDuration.toMillis(), TimeUnit.MILLISECONDS);
-            commands.watch(name);
+            String permits = commands.get(name);
             if (Integer.parseInt(permits) > 0) {
+                commands.watch(name);
                 commands.multi();
                 commands.decr(name);
-                RedisFuture transactionFuture = commands.exec();
-                if (transactionFuture.isCancelled()) {
+                TransactionResult transactionFuture = commands.exec();
+                if (transactionFuture.wasDiscarded()) {
                     return false;
                 } else
                     return true;
@@ -101,7 +101,7 @@ public class RedisBasedRateLimiterV2 implements RateLimiter {
     @Override
     public boolean getPermission(Duration timeoutDuration) {
         try {
-            boolean success = tryAcquireFromRedis(timeoutDuration);
+            boolean success = tryAcquireFromRedis();
             publishRateLimiterEvent(success);
             return success;
         } catch (Exception e) {

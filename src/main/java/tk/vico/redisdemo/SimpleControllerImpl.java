@@ -14,15 +14,17 @@ public class SimpleControllerImpl implements SimpleController {
 
     @Override
     public String invoke() {
+        long start = System.currentTimeMillis();
         RateLimiter rateLimiter = rateLimiterFactory.getApplicationLimiter("default");
         CheckedFunction0<String> function = RateLimiter.decorateCheckedSupplier(rateLimiter, () -> ("executing!!!"));
         String result = Try.of(function)
                 .recover((throwable) -> "error: " + throwable.getMessage()).get();
-        return result;
+        long current = System.currentTimeMillis();
+        return (result + ":" + (current - start)    );
     }
 
     @Override
-    public String calculateAverageTime() {
-        return null;
+    public long calculateAverageTime() {
+        return -1;
     }
 }
