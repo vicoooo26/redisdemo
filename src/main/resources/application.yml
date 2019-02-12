@@ -4,9 +4,11 @@ spring:
   # REDIS (RedisProperties)
   redis:
 #    host: 192.168.99.100 # server host
-    pool: 127.0.0.1
+    host: 127.0.0.1
     port: 6379 # connection port
+redisson:
+  host: 127.0.0.1
+  port: 6379
 server:
   port: 8080
-
 round: 100

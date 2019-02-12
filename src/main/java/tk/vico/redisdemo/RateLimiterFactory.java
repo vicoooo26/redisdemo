@@ -30,7 +30,7 @@ public class RateLimiterFactory {
                             .timeoutDuration(Duration.ofMillis(100L))
                             .build();
 //                    initAllRatelimiter(rateLimiterConfig);
-                    applicationLimiterContainer.put("default", new RedisBasedRateLimiterV3("default", rateLimiterConfig));
+                    applicationLimiterContainer.put("default", new RedisBasedRateLimiterV4("default", rateLimiterConfig));
                 }
             }
         }
@@ -43,7 +43,7 @@ public class RateLimiterFactory {
 
     public void initAllRatelimiter(RateLimiterConfig rateLimiterConfig) {
         for (int i = 1; i <= round; i++) {
-            RateLimiter rateLimiter = new RedisBasedRateLimiterV2("default_" + i, rateLimiterConfig);
+            RateLimiter rateLimiter = new RedisBasedRateLimiterV4("default_" + i, rateLimiterConfig);
             applicationLimiterContainer.put("default_" + i, rateLimiter);
         }
     }

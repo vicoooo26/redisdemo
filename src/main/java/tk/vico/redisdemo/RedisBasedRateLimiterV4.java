@@ -5,14 +5,10 @@ import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.github.resilience4j.ratelimiter.event.RateLimiterOnFailureEvent;
 import io.github.resilience4j.ratelimiter.event.RateLimiterOnSuccessEvent;
 import io.github.resilience4j.ratelimiter.internal.RateLimiterEventProcessor;
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisFuture;
-import io.lettuce.core.SetArgs;
-import io.lettuce.core.TransactionResult;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.api.async.RedisAsyncCommands;
-import io.lettuce.core.api.sync.RedisCommands;
 import io.vavr.control.Option;
+import org.redisson.api.RBucket;
+import org.redisson.api.RSemaphore;
+import org.redisson.api.RedissonClient;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
@@ -21,69 +17,39 @@ import java.util.concurrent.atomic.AtomicReference;
 import static java.util.Objects.requireNonNull;
 
 
-public class RedisBasedRateLimiterV3 implements RateLimiter {
+public class RedisBasedRateLimiterV4 implements RateLimiter {
 
     private static final String NAME_MUST_NOT_BE_NULL = "Name must not be null";
     private static final String CONFIG_MUST_NOT_BE_NULL = "RateLimiterConfig must not be null";
 
     private final String name;
     private final AtomicReference<RateLimiterConfig> rateLimiterConfig;
-    private final RedisBasedRateLimiterV3.RedisBasedRateLimiterV3Metrics metrics;
+    private final RedisBasedRateLimiterV4.RedisBasedRateLimiterV3Metrics metrics;
     private final RateLimiterEventProcessor eventProcessor;
-    private final RedisClient redisClient;
+    private final RedissonClient redissonClient;
 
 
-    public RedisBasedRateLimiterV3(String name, final RateLimiterConfig rateLimiterConfig) {
+    public RedisBasedRateLimiterV4(String name, final RateLimiterConfig rateLimiterConfig) {
         this(name, rateLimiterConfig, null);
     }
 
-    public RedisBasedRateLimiterV3(String name, RateLimiterConfig rateLimiterConfig, RedisClient redisClient) {
+    public RedisBasedRateLimiterV4(String name, RateLimiterConfig rateLimiterConfig, RedissonClient redissonClient) {
         this.name = requireNonNull(name, NAME_MUST_NOT_BE_NULL);
-        this.redisClient = Option.of(redisClient).getOrElse(this::configureRedisClient);
+        this.redissonClient = Option.of(redissonClient).getOrElse(this::configureRedisClient);
         this.metrics = this.new RedisBasedRateLimiterV3Metrics();
         this.eventProcessor = new RateLimiterEventProcessor();
-        this.rateLimiterConfig = new AtomicReference<>(requireNonNull(initLimit(rateLimiterConfig), CONFIG_MUST_NOT_BE_NULL));
+        this.rateLimiterConfig = new AtomicReference<>(requireNonNull(rateLimiterConfig, CONFIG_MUST_NOT_BE_NULL));
+        initLimit();
     }
 
-    private RateLimiterConfig initLimit(RateLimiterConfig rateLimiterConfig) {
-        try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
-            RedisCommands<String, String> commands = connection.sync();
-            SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.getLimitRefreshPeriod().getSeconds())
-                    .nx();
-            commands.set(name, String.valueOf(rateLimiterConfig.getLimitForPeriod()), args);
-            return rateLimiterConfig;
-        }
+    private void initLimit() {
+        RateLimiterConfig config = rateLimiterConfig.get();
+        RBucket bucket = redissonClient.getBucket(name);
+        bucket.trySet(config.getLimitForPeriod(), config.getLimitRefreshPeriod().getSeconds(), TimeUnit.SECONDS);
     }
 
-    private RedisClient configureRedisClient() {
-        return SpringContext.getBean(RedisClient.class);
-    }
-
-    private boolean tryAcquireFromRedis() {
-        try (StatefulRedisConnection<String, String> connection = this.redisClient.connect()) {
-            RedisCommands<String, String> commands = connection.sync();
-            SetArgs args = SetArgs.Builder.ex(rateLimiterConfig.get().getLimitRefreshPeriod().getSeconds())
-                    .nx();
-            commands.set(name, String.valueOf(rateLimiterConfig.get().getLimitForPeriod()), args);
-            String permits = commands.get(name);
-//            if (Integer.parseInt(permits) > 0) {
-//                commands.watch(name);
-//                commands.multi();
-//                commands.decr(name);
-//                TransactionResult transactionFuture = commands.exec();
-//                if (transactionFuture.wasDiscarded()) {
-//                    return false;
-//                } else
-//                    return true;
-                if (commands.decr(name) > 0)
-                    return true;
-                else
-                    return false;
-//            } else
-//                return false;
-        } catch (Exception e) {
-            throw e;
-        }
+    private RedissonClient configureRedisClient() {
+        return SpringContext.getBean(RedissonClient.class);
     }
 
     @Override
@@ -105,10 +71,12 @@ public class RedisBasedRateLimiterV3 implements RateLimiter {
     @Override
     public boolean getPermission(Duration timeoutDuration) {
         try {
-            boolean success = tryAcquireFromRedis();
+            initLimit();
+            RSemaphore semaphore = redissonClient.getSemaphore(name);
+            boolean success = semaphore.tryAcquire(timeoutDuration.toNanos(), TimeUnit.NANOSECONDS);
             publishRateLimiterEvent(success);
             return success;
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             publishRateLimiterEvent(false);
             return false;
@@ -146,22 +114,13 @@ public class RedisBasedRateLimiterV3 implements RateLimiter {
 
         @Override
         public int getAvailablePermissions() {
-            try {
-                return Integer.parseInt(redisClient.connect().sync().get(name));
-            } catch (NumberFormatException e) {
-                return -1;
-            }
+            return redissonClient.getSemaphore(name).availablePermits();
         }
 
         @Override
         public int getNumberOfWaitingThreads() {
-            try {
-                return redisClient.getResources().computationThreadPoolSize();
-            } catch (NumberFormatException e) {
-                return -1;
-            }
+            return redissonClient.getConfig().getThreads();
         }
-
     }
 
     private void publishRateLimiterEvent(boolean permissionAcquired) {
