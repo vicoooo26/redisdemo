@@ -5,10 +5,10 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-@Component
+//@Component
 @Getter
 @Setter
-@ConfigurationProperties(prefix = "redisson")
+//@ConfigurationProperties(prefix = "redisson")
 public class RedissonConfig {
     String port;
     String host;

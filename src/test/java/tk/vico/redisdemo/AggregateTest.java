@@ -6,6 +6,9 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.vavr.CheckedRunnable;
 import io.vavr.control.Try;
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -18,16 +21,18 @@ public class AggregateTest {
 
     static Map<String, RateLimiter> applicationLimiterContainer = new ConcurrentHashMap<>();
     static List<Long> ratelimiterSum = new ArrayList<>();
+    static int permits = 200;
+    static int threads = 200;
 
     public static void main(String[] args) {
         before();
 
         long start = System.currentTimeMillis();
-        CyclicBarrier barrier = new CyclicBarrier(500, new Time(start));
+        CyclicBarrier barrier = new CyclicBarrier(threads, new Time(start));
 
         ExecutorService executor = Executors.newCachedThreadPool();
         //起n个线程
-        for (int i = 1; i <= 500; i++) {
+        for (int i = 1; i <= threads; i++) {
             executor.submit(() -> {
                 try {
                     long result = ratelimiter();
@@ -57,15 +62,19 @@ public class AggregateTest {
 
 
     public static void before() {
-        RedisURI redisURI = RedisURI.Builder.redis("127.0.0.1", 6379).build();
-        RedisClient redisClient = RedisClient.create(redisURI);
+        Config config = new Config();
+        config.setCodec(new org.redisson.client.codec.StringCodec());
+        config.useSingleServer().setAddress("redis://127.0.0.1:6379").setPassword(null);
+        RedissonClient redissonClient = Redisson.create(config);
+//        RedisURI redisURI = RedisURI.Builder.redis("127.0.0.1", 6379).build();
+//        RedisClient redisClient = RedisClient.create(redisURI);
         RateLimiterConfig rateLimiterConfig = RateLimiterConfig.custom()
-                .limitForPeriod(50)
+                .limitForPeriod(permits)
                 .limitRefreshPeriod(Duration.ofSeconds(180))
                 .timeoutDuration(Duration.ofMillis(100L))
                 .build();
         //初始化多少个ratelimiter
-        RateLimiter rateLimiter = new RedisBasedRateLimiterV3("default_local", rateLimiterConfig, redisClient);
+        RateLimiter rateLimiter = new RedisBasedRateLimiterV4("default_local", rateLimiterConfig, redissonClient);
         applicationLimiterContainer.put(rateLimiter.getName(), rateLimiter);
     }
 

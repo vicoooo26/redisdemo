@@ -6,7 +6,7 @@ import io.lettuce.core.RedisURI;
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cache.annotation.CachingConfigurerSupport;
 import org.springframework.context.annotation.Bean;
@@ -16,8 +16,13 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 @Configuration
 @EnableConfigurationProperties
 public class RedisConfig extends CachingConfigurerSupport {
-    @Autowired
-    RedissonConfig redissonConfig;
+
+    @Bean
+    @ConfigurationProperties(prefix = "redisson")
+    public RedissonConfig redissonConfig() {
+        return new RedissonConfig();
+
+    }
 
     @Bean
     public RedisClient redisClient(LettuceConnectionFactory factory) {
@@ -27,7 +32,7 @@ public class RedisConfig extends CachingConfigurerSupport {
     }
 
     @Bean
-    public RedissonClient redissonClient() {
+    public RedissonClient redissonClient(RedissonConfig redissonConfig) {
         Config config = new Config();
         config.setCodec(new org.redisson.client.codec.StringCodec());
         config.useSingleServer().setAddress(redissonConfig.toString()).setPassword(null);

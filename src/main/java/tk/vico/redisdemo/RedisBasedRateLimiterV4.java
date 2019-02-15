@@ -24,7 +24,6 @@ public class RedisBasedRateLimiterV4 implements RateLimiter {
 
     private final String name;
     private final AtomicReference<RateLimiterConfig> rateLimiterConfig;
-    private final RedisBasedRateLimiterV4.RedisBasedRateLimiterV3Metrics metrics;
     private final RateLimiterEventProcessor eventProcessor;
     private final RedissonClient redissonClient;
 
@@ -36,7 +35,6 @@ public class RedisBasedRateLimiterV4 implements RateLimiter {
     public RedisBasedRateLimiterV4(String name, RateLimiterConfig rateLimiterConfig, RedissonClient redissonClient) {
         this.name = requireNonNull(name, NAME_MUST_NOT_BE_NULL);
         this.redissonClient = Option.of(redissonClient).getOrElse(this::configureRedisClient);
-        this.metrics = this.new RedisBasedRateLimiterV3Metrics();
         this.eventProcessor = new RateLimiterEventProcessor();
         this.rateLimiterConfig = new AtomicReference<>(requireNonNull(rateLimiterConfig, CONFIG_MUST_NOT_BE_NULL));
         initLimit();
@@ -100,27 +98,12 @@ public class RedisBasedRateLimiterV4 implements RateLimiter {
 
     @Override
     public Metrics getMetrics() {
-        return this.metrics;
+        return null;
     }
 
     @Override
     public EventPublisher getEventPublisher() {
         return eventProcessor;
-    }
-
-    private final class RedisBasedRateLimiterV3Metrics implements Metrics {
-        private RedisBasedRateLimiterV3Metrics() {
-        }
-
-        @Override
-        public int getAvailablePermissions() {
-            return redissonClient.getSemaphore(name).availablePermits();
-        }
-
-        @Override
-        public int getNumberOfWaitingThreads() {
-            return redissonClient.getConfig().getThreads();
-        }
     }
 
     private void publishRateLimiterEvent(boolean permissionAcquired) {
